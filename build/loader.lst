@@ -1,0 +1,116 @@
+     1                                  ;===================================
+     2                                  ; AtlantOS - Stage 2 Loader
+     3                                  ; The "Gatekeeper" to Protected Mode
+     4                                  ;===================================
+     5                                  [ORG 0x1000]                    ; We loaded this file here in stage 1
+     6                                  [BITS 16]                       ; Still in 16-bit mode for a moment
+     7                                  
+     8                                  loader_start:
+     9                                      ; Quick confirmation we made it here
+    10 00000000 BE[4B00]                    mov si, msg_stage2
+    11 00000003 E87A00                      call print_string_16
+    12                                  
+    13                                      ; 1. Enable A20 Line
+    14                                      ; The "A20 Gate" is a legacy quirk. If not enabled,
+    15                                      ; we can anly access 1MB of RAM. We need it all.
+    16                                      ; (Simplified Fast A20 Method)
+    17 00000006 E492                        in al, 0x92
+    18 00000008 0C02                        or al, 2
+    19 0000000A E692                        out 0x92, al
+    20                                  
+    21                                      ; 2. Load the Global Descriptor Table (GDT)
+    22                                      ; The GDT defines memory segments in 32-bit mode
+    23 0000000C FA                          cli                         ; Disable Interrupts (BIOS interrupts won't work in 32-bit)
+    24 0000000D 0F0116[7A00]                lgdt [gdt_descriptor]       ; Load the GDT pointer
+    25                                  
+    26                                      ; 3. Switch to Protected Mode
+    27 00000012 0F20C0                      mov eax, cr0                ; Read Control Register 0
+    28 00000015 6683C801                    or eax, 0x1                 ; Set Protection Enable (PE) Bit
+    29 00000019 0F22C0                      mov cr0, eax                ; Write it back
+    30                                  
+    31                                      ; 4. The Far Jump
+    32                                      ; We must perform a "Far Jump" to flush the CPU pipeline
+    33                                      ; of any 16-bit ibtructions and load the Code Segment.
+    34 0000001C EA[2100]0800                jmp CODE_SEG:init_32bit
+    35                                  
+    36                                  ;======================
+    37                                  ; 32-bit Protected Mode
+    38                                  ;======================
+    39                                  [BITS 32]
+    40                                  
+    41                                  init_32bit:
+    42                                      ; Update Segment Registers to point to out 32-bit Data Segment
+    43 00000021 66B81000                    mov ax, DATA_SEG
+    44 00000025 8ED8                        mov ds, ax
+    45 00000027 8ED0                        mov ss, ax
+    46 00000029 8EC0                        mov es, ax
+    47 0000002B 8EE0                        mov fs, ax
+    48 0000002D 8EE8                        mov gs, ax
+    49                                  
+    50                                      ; Move Stack to a safe place at the toop of free memory
+    51 0000002F BD00000900                  mov ebp, 0x90000
+    52 00000034 89EC                        mov esp, ebp
+    53                                  
+    54                                      ; We are now in 32-bit mode
+    55                                      ; We have access to 4GB of RAM and 32-bit Registers (EAX, EBX...)
+    56                                  
+    57                                      ; Visual Confirmation: Write to video memory directly
+    58                                      ; Since BIOS interrupts don't work anymore
+    59 00000036 C60500800B0041              mov byte [0xB8000], 'A'     ; Character A
+    60 0000003D C60501800B000B              mov byte [0xB8001], 0x0B    ; Cyan on Black
+    61                                  
+    62                                      ; Jump to kernel Entry Point
+    63 00000044 EA002000000800              jmp CODE_SEG:0x2000         ; Kernel is loaded at 0x2000
+    64                                  
+    65                                  ;----Data Structures----
+    66                                  
+    67 0000004B 456E746572696E6720-     msg_stage2 db 'Entering the Deep...', 0x0D, 0x0A, 0
+    67 00000054 74686520446565702E-
+    67 0000005D 2E2E0D0A00         
+    68                                  
+    69                                  ;----GDT Definition----
+    70                                  gdt_start:
+    71                                  
+    72                                      ; Null Descriptor (Required to be first)
+    73 00000062 00000000                    dd 0x0
+    74 00000066 00000000                    dd 0x0
+    75                                  
+    76                                      ; Code Segment Descriptor
+    77                                      ; Base=0, Limit=4GB, Executable, Readable
+    78 0000006A FFFF                        dw 0xFFFF                   ; Limit (bits 0-15)
+    79 0000006C 0000                        dw 0x0000                   ; Base (bits 0-15)
+    80 0000006E 00                          db 0x00                     ; Base (bits 16-23)
+    81 0000006F 9A                          db 10011010b                ; Access Byte (Present, Ring 0, Code, Readable)
+    82 00000070 CF                          db 11001111b                ; Flags (32-bit, 4K granularity) + Limit (bits 16-19)
+    83 00000071 00                          db 0x00                     ; Base (bits 24-31)
+    84                                  
+    85                                      ; Data Segment Descriptor
+    86                                      ; Base=0, Limit=4GB, Writable
+    87 00000072 FFFF                        dw 0xFFFF
+    88 00000074 0000                        dw 0x0000
+    89 00000076 00                          db 0x00
+    90 00000077 92                          db 10010010b                ; Access Byte (Present, Ring 0, Data, Writable)
+    91 00000078 CF                          db 11001111b
+    92 00000079 00                          db 0x00
+    93                                  
+    94                                  gdt_end:
+    95                                  
+    96                                  gdt_descriptor:
+    97 0000007A 1700                        dw gdt_end - gdt_start - 1  ; Size of GDT
+    98 0000007C [62000000]                  dd gdt_start                ; Start Address of GDT
+    99                                  
+   100                                  ; Constants for Segment Offsets
+   101                                  CODE_SEG equ 0x08               ; gdt_start + 1 * 8
+   102                                  DATA_SEG equ 0x10               ; gdt_start + 2 * 8
+   103                                  
+   104                                  ; Helper function for stage 2 (16-bit mode)
+   105                                  print_string_16:
+   106 00000080 B40E                        mov ah, 0x0E
+   107                                  .loop:
+   108 00000082 AC                          lodsb
+   109 00000083 08C0                        or al, al
+   110 00000085 7404                        jz .done
+   111 00000087 CD10                        int 0x10
+   112 00000089 EBF7                        jmp .loop
+   113                                  .done:
+   114 0000008B C3                          ret

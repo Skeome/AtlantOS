@@ -1,0 +1,78 @@
+     1                                  ;==============================
+     2                                  ; AtlantOS - Stage 1 Bootloader
+     3                                  ; The "Surface Interface"
+     4                                  ;==============================
+     5                                  [ORG 0x7C00]                    ; BIOS always loads us here
+     6                                  [BITS 16]                       ; Start in 16-bit Real Mode
+     7                                  
+     8                                  ;----Constants----
+     9                                  LOADER_OFFSET equ 0x1000        ; We will load stage 2 at memory address 0x1000
+    10                                  LOADER_SIZE equ 20              ; Read 20 sectors (10KB for loader and kernel)
+    11                                  
+    12                                  start:
+    13                                      ; 1. Save the Boot Drive Number
+    14                                      ; The BIOS stores the drive number it booted from in DL
+    15                                      ; We must save this because other instructions might overwrite DL
+    16 00000000 8816[4B00]                  mov [BOOT_DRIVE], dl
+    17                                  
+    18                                      ; 2. Setup Segment Registers
+    19 00000004 31C0                        xor ax, ax                  ; Set AX to 0
+    20 00000006 8ED8                        mov ds, ax                  ; Data Segment = 0
+    21 00000008 8EC0                        mov es, ax                  ; Extra Segment = 0
+    22 0000000A 8ED0                        mov ss, ax                  ; Stack Segment = 0
+    23 0000000C BC007C                      mov sp, 0x7C00              ; Stack grows down from where we loaded. Safe.
+    24                                  
+    25                                      ; 3. Reset Disk Controller
+    26 0000000F B400                        mov ah, 0x00                ; INT 13h AH=0 (Reset)
+    27 00000011 8A16[4B00]                  mov dl, [BOOT_DRIVE]        ; Use the saved drive number
+    28 00000015 CD13                        int 0x13
+    29 00000017 721E                        jc disk_error               ; If Carry Flag (CF) is set, something broke
+    30                                  
+    31                                      ; 4. Load stage 2 (loader.asm) from disk
+    32 00000019 BB0010                      mov bx, LOADER_OFFSET       ; ES:BX = Buffer Address (0x0000:0x1000)
+    33 0000001C B402                        mov ah, 0x02                ; INT 13h AH=2 (Read Sectors)
+    34 0000001E B014                        mov al, LOADER_SIZE         ; Number of sectors to read
+    35 00000020 B500                        mov ch, 0x00                ; Cylinder 0
+    36 00000022 B600                        mov dh, 0x00                ; Head 0
+    37 00000024 B102                        mov cl, 0x02                ; Sector 2 (Sector 1 is this bootloader)
+    38 00000026 8A16[4B00]                  mov dl, [BOOT_DRIVE]        ; Use the saved drive number
+    39 0000002A CD13                        int 0x13
+    40 0000002C 7209                        jc disk_error               ; Error Check if CF is set
+    41                                  
+    42                                      ; 5. The "Dive" - Jump to Stage 2
+    43 0000002E BE[4C00]                    mov si, msg_success
+    44 00000031 E80B00                      call print_string
+    45                                  
+    46 00000034 E9(0010)                    jmp LOADER_OFFSET           ; Transfer control to 0x1000
+    47                                  
+    48                                  ;----Subroutines----
+    49                                  
+    50                                  disk_error:
+    51 00000037 BE[6600]                    mov si, msg_error
+    52 0000003A E80200                      call print_string
+    53 0000003D EBFE                        jmp $                       ; Infinite loop (Hang the system)
+    54                                  
+    55                                  print_string:
+    56                                      ; Basic BIOS Teletype output
+    57 0000003F B40E                        mov ah, 0x0E
+    58                                  .loop:
+    59 00000041 AC                          lodsb                       ; Load the byte at DS:SI into AL
+    60 00000042 08C0                        or al, al                   ; Check if zero (End of string)
+    61 00000044 7404                        jz .done
+    62 00000046 CD10                        int 0x10                    ; BIOS Interrupt: Print Character
+    63 00000048 EBF7                        jmp .loop
+    64                                  .done:
+    65 0000004A C3                          ret
+    66                                  
+    67                                  ;----Data----
+    68 0000004B 00                      BOOT_DRIVE db 0                 ; Variable to store the drive number
+    69 0000004C 41746C616E744F5320-     msg_success db 'AtlantOS Initialized...', 0x0D, 0x0A, 0
+    69 00000055 496E697469616C697A-
+    69 0000005E 65642E2E2E0D0A00   
+    70 00000066 4469736B204572726F-     msg_error db 'Disk Error. Halting.', 0
+    70 0000006F 722E2048616C74696E-
+    70 00000078 672E00             
+    71                                  
+    72                                  ;----Padding and Magic Number----
+    73 0000007B 00<rep 183h>            times 510 - ($ - $$) db 0       ; Pad remaining bytes with 0
+    74 000001FE 55AA                    dw 0xAA55                       ; Boot Signature (Required by BIOS)
