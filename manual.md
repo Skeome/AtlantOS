@@ -523,4 +523,186 @@ This differs from the segmented memory model of older processors.
 ```
 
 ## Program Sections in Detail
+### Text Segment (.text)
+Contains executable machine instructions with modern security features:
+- **Read Only**: Prevents code modification attacks
+- **Execute Permission**: CPU can fetch instructions from this region
+- **Shared**: Multiple instances of the same program can share this segment
+- **Position Independent Code (PIC)**: Supports ASLR security
+```
+section .text
+    global _start
 
+_start:
+    ; Modern 64-bit system call example
+    mov rax, 1                  ; sys_write (64_bit)
+    mov rdx, 1                  ; stdout
+    moc rsi, message            ; message pointer
+    mov rdx, msg_len            ; message length
+    syscall                     ; 64-bit system call interface
+
+    ; Clean exit
+    mov rax, 60                 ; sys_exit (64-bit)
+    mov rdi, 0                  ; exit status
+    syscall
+```
+
+### Data Segment (.data)
+Stores initialized global and static variables:
+- **Read-Write Access**: Data can be modified during execution
+- **Initialized Values** Contains predefined data values
+- **Global Scope**: Accessible throughout the program
+- **Security Considerations**: DEP/NX bit prevents code execution
+```
+section .data
+    ; String data with null termination
+    app_name db 'Modern Assembly App', 0
+    version db '2.0.1', 0
+
+    ; Numeric data types
+    user_id dd 12345
+    timestamp dq 1693852800
+
+    ; Arrays and lookup tables
+    error_codes dd 100, 101, 102, 103
+    hex_chars db '0123456789ABCDEF'
+
+    ; Configuration constants
+    MAX_CONNECTIONS equ 1000
+    BUFFER_SIZE equ 8192
+    API_VERSION equ 3
+```
+
+### BSS Segment (.bss)
+Reserved for uninitialized variables, automatically zeroed by the loader:
+- **Zero-Initialized**: All bytes set to zero at program start
+- **No File Space**: Doesn't consume disk space in executable
+- **Runtime Allocation**: Memory allocated when program loads
+- **Efficient Storage**: Large Arrays don't increase file size
+```
+section .bss
+    ; Input/Output buffers
+    input_buffer resb 4096
+    output_buffer resb 4096
+
+    ; Runtime variables
+    connection_count resd 1
+    total_bytes_processed resq 1
+
+    ; Dynamic arrays
+    user_sessions resq 1000
+    temp_workspace resb 65536
+```
+
+## Stack Segment
+The stack grows downward from high memory addresses and handles:
+- **Function Calls**: Return addresses and parameters
+- **Local Variables**: Automatic storage duration variables
+- **Register Preservation**: Saving/restoring register values
+- **Exception Handling**: Stack unwinding for error recovery
+
+### Modern Stack Features
+- **Stack Canaries**: Buffer overflow detection
+- **Shadow Stack (Intel CET)**: Return address protection
+- **Stack Guard Pages**: Prevent stack overflow
+- **Thread-Local Storage**: Per-thread stack spaces
+
+## Heap Segment
+Dynamic memory allocation area managed by system allocators:
+- **malloc/free**: C library management
+- **Memory Management Units (MMU)**: Hardware-assisted allocation
+- **Heap Randomization**: Security feature in modern systems
+- **Garbage Collection**: Automatic memory management in some systems
+
+## Memory Protection and Security
+### Hardware Security Features
+- **NX Bit (No-eXecute)**: Prevents code execution in data segments
+- **SMEP/SMAP**: Kernel protection from user-mode exploits
+- **Intel MPX**: Bounds checking for arrays and pointers
+- **ARM Pointer Authentication**: Cryptographic return address protection
+
+### Operating System Security
+- **KASLR**: Kernel Address Space Layout Randomization
+- **Control Flow Integrity (CFI)**: Prevents ROP/JOP attacks
+- **Intel CET**: Control-flow Enforcement Technology
+- **Memory Tagging**: Hardware-assisted use-after-free detection
+
+## Working With Modern Memory Layout
+```
+; Example: Modern memory-aware assembly program
+section .data
+    ; Read-only constants
+    MAGIC_NUMBER equ 0xDEADBEEF
+    program_info db 'Memory Layout Demo v2.0', 0xA, 0
+    info_len equ $ - program_info
+
+section .bss
+    ; Uninitialized data
+    runtime_buffer resb 1024
+    user_data resq 100
+
+section .text
+    global _start
+
+_start:
+    ; Display program information
+    mov rax, 1                  ; sys_write
+    mov rdi, 1                  ; stdout
+    mov rsi, program_info       ; message
+    mov rdx info_len            ; length
+    syscall
+
+    ; Initialize runtime buffer
+    mov rdi, runtime_buffer     ; destination
+    mov rax, 0                  ; value
+    mov rcx, 1024               ; count
+    rep stosb                   ; fill buffer with zeroes
+
+    ; Access different memory segments
+    mov rax, MAGIC_NUMBER       ; from .data segment
+    mov [user_data], rax        ; store in .bss segment
+
+    ; Clean exit
+    mov rax, 60                 ; sys_exit
+    mov rdi, 0                  ; success status
+    syscall
+
+    ; This would be in a different segment and cause segfault:
+    ; mov byte [_start], 0x90   ; trying to modify code segment
+```
+
+## Memory Debugging and Analysis Tools
+Modern development environments provide sophisticated tools for memory analysis:
+
+### Static Analysis
+- **objdump**: examine object file segments
+- **readelf**: display ELF file structure
+- **nm**: List symbols and their memory locations
+- **size**: Display segment sizes
+
+### Runtime Analysis
+- **Valgrind**: Memory error detection
+- **AddressSanitizer**: Fast memory error detector
+- **/proc/maps**: View process memory layout
+- **GDB memory commands**: Examine memory during debugging
+
+### Example: Examining Memory Layout
+```
+# Compile with symbols
+nasm -f elf64 -g program.asm -o program.o
+ld program.o -o program
+
+# Examine segments
+readelf -l program
+objdump -h program
+
+# View runtime memory map
+cat /proc/$(pidof program)/maps
+
+# Debug memory access
+gdb program
+(gdb) info proc mappings
+(gdb) x/10x 0x400000        # Examine text segment
+```
+
+Understanding memory segments is crucial for system programming, security analysis, and optimizing program performance in modern computing environments.
