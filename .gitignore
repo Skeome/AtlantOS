@@ -1,2 +1,2 @@
 qemu.log
-build/
+build/*.bin
